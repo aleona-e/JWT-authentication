@@ -7,16 +7,24 @@ from flask_migrate import Migrate
 from flask_swagger import swagger
 from flask_cors import CORS
 from api.utils import APIException, generate_sitemap
-from api.models import db
+from api.models import db, User
 from api.routes import api
 from api.admin import setup_admin
 from api.commands import setup_commands
+
+from flask_jwt_extended import create_access_token
+from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import jwt_required
+from flask_jwt_extended import JWTManager
 
 #from models import Person
 
 ENV = os.getenv("FLASK_ENV")
 static_file_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../public/')
 app = Flask(__name__)
+app.config["JWT_SECRET_KEY"] = "super-secret"  # Change this!
+jwt = JWTManager(app)
+
 app.url_map.strict_slashes = False
 
 # database condiguration
@@ -63,6 +71,47 @@ def serve_any_other_file(path):
     response.cache_control.max_age = 0 # avoid cache memory
     return response
 
+@app.route('/signup', methods=['POST', 'GET'])    
+def signup():
+    body = request.get_json()
+    email = body['email']
+    password = body['password']
+    aux_user = User.query.filter_by(email=email).first()
+    if not (aux_user is None):
+       raise APIException("Usuario ya existe.")
+    user = User(email=email, password=password, is_active=True)
+    db.session.add(user)
+    db.session.commit()
+    return jsonify(user.serialize()),201
+
+@app.route('/login', methods=['POST', 'GET'])
+def login():
+    body = request.get_json()
+    email = body['email']
+    password = body['password']
+    user = User.query.filter_by(email=email).first()
+    if user is None:
+        raise APIException("Usuario no existe")
+    if user.password != password:
+        raise APIException("Usuario no encontrado")
+    data = {
+        'email': user.email,
+        'user_id': user.id
+    }
+    token = create_access_token(identity=data)
+    return jsonify(token)
+
+@app.route("/protected", methods=["GET"])
+@jwt_required()
+def protected():
+    # Access the identity of the current user with get_jwt_identity
+    current_user_info = get_jwt_identity()
+    print("holaaaa")
+    print(current_user_info)
+    user = User.query.get(current_user_info["user_id"])
+    
+    
+    return jsonify({"id": user.id, "email": user.email }), 200
 
 # this only runs if `$ python src/main.py` is executed
 if __name__ == '__main__':
